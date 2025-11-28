@@ -7,7 +7,6 @@ from scipy.stats import norm
 from scipy.integrate import trapezoid
 from unittest.mock import MagicMock, patch
 
-# Add the parent directory to sys.path to locate market_expectations.py
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from market_expectations import MarketExpectations
@@ -25,7 +24,7 @@ class TestMarketExpectations(unittest.TestCase):
             )
             self.mock_ticker.options = ("2025-01-01", "2025-06-01")
             
-            # Initialize with standard values: Spot=100, r=5%, q=0%
+            # Initialize with standard values
             self.me = MarketExpectations("TEST", risk_free_rate=0.05, dividend_yield=0.0)
 
     def test_black_scholes_vanilla(self):
@@ -57,14 +56,14 @@ class TestMarketExpectations(unittest.TestCase):
 
     def test_shimko_flat_volatility_recovery(self):
         """
-        CRITICAL MATH CHECK:
+        Math Check:
         If we feed a constant IV (Flat Smile) into the Shimko smoothing,
-        the resulting PDF must be Lognormal centered at the Forward Price.
+        the resulting pdf must be lognormal centered at the forward price.
         """
         # 1. Mock Option Chain with constant IV
         # Widen range to 10-300 to capture full tails (prevent truncation error)
         strikes = np.linspace(10, 300, 200)
-        ivs = np.full_like(strikes, 0.20) # Flat 20% vol
+        ivs = np.full_like(strikes, 0.20) # flat 20% vol
         
         mock_chain = MagicMock()
         mock_chain.calls = pd.DataFrame({
@@ -78,20 +77,20 @@ class TestMarketExpectations(unittest.TestCase):
         # 2. Run computation
         with patch('market_expectations.datetime') as mock_date:
             from datetime import datetime
-            # Fix "Now" and "Expiry" to exactly 1 year difference
+            # Fix "now" and "expiry" to 1 year difference
             mock_date.now.return_value = datetime(2024, 1, 1)
-            mock_date.strptime.return_value = datetime(2025, 1, 1) # 366 days ~ 1.002 years
+            mock_date.strptime.return_value = datetime(2025, 1, 1)
             
             res = self.me._compute_risk_neutral_pdf("2025-01-01", 0.1, 3.0) # Widen bounds for test
             
             self.assertIsNotNone(res, "Shimko method failed to fit flat volatility.")
             
-            # 3. Verify Mean of PDF = Forward Price
+            # 3. Verify Mean of pdf = forward price
             # F = S * e^{(r-q)T}
             T = res['T']
             expected_mean = 100 * np.exp((0.05 - 0.0) * T)
             
-            # Calculate mean from PDF
+            # Calculate mean from pdf
             pdf_mean = trapezoid(res['strikes'] * res['pdf'], res['strikes'])
             
             # Allow 1% error margin for numerical integration/polyfit artifacts
@@ -101,13 +100,13 @@ class TestMarketExpectations(unittest.TestCase):
 
     def test_real_world_transform_neutral(self):
         """
-        If Expected Return (ERP) matches the Risk-Neutral Drift exactly, 
-        Gamma should be 0 (Risk Neutral = Real World).
+        If expected return (ERP) matches the risk-neutral drift exactly, 
+        Gamma should be 0 (risk neutral = real world).
         """
-        # Create a dummy Risk-Neutral dataset
+        # create a dummy risk-neutral dataset
         x = np.linspace(80, 120, 100)
         pdf = norm.pdf(x, 100, 10)
-        pdf /= trapezoid(pdf, x) # Normalize
+        pdf /= trapezoid(pdf, x) # normalize
         
         data_q = {
             'strikes': x,

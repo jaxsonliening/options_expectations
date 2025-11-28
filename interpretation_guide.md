@@ -4,7 +4,7 @@
 
 This tool calculates the **Market's Base Rate** (what is priced in). It does not tell you what *will* happen; it tells you what the market *fears* will happen.
 
-## The Core Concept: Probability Gap
+## Core Concept: Probability Gap
 
 To generate Alpha, you must identify a gap between **Market Implied Probability** ($\mathbb{P}_{mkt}$) and **Fundamental Conviction** ($\mathbb{P}_{fund}$).
 
