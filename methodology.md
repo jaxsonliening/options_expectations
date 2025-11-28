@@ -1,6 +1,6 @@
 Mathematical Methodology
 
-This document outlines the computational framework used to derive "Real-World" probabilities from option prices. The process moves from noisy market data to a clean probability density function (PDF) through three distinct stages.
+This document outlines the computational framework used to derive "real-world" probabilities from option prices. The process moves from noisy market data to a clean probability density function (PDF) through three distinct stages.
 
 Stage 1: Volatility Smoothing (Shimko's Method)
 

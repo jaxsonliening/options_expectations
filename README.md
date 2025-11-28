@@ -47,11 +47,20 @@ Default: 0.5 2.5 (Analyzes strikes between 50% and 250% of Spot).
 python market_expectations.py NVDA --ev 90 130 160 --bounds 0.4 3.0
 
 
+4. Analyzing High-Yield Stocks
+For companies with significant dividends (like Verizon or REITs), you must include the dividend yield. This corrects the "Drift" in the Black-Scholes model; without it, the model will overestimate the expected stock price.
+
+# Example: Verizon (VZ) with ~6.5% Dividend Yield
+python market_expectations.py VZ --ev 30 42 50 --div 0.065
+
+
 Configuration Arguments
 
 --months: Investment horizon in months (default: 12).
 
 --r: Risk-free rate (default: 0.042 i.e., 4.2%).
+
+--div: Dividend Yield (default: 0.0). Enter as a decimal (e.g., 0.05 for 5%). Crucial for accurate drift calculation on high-yield stocks (Real Estate, Utilities, Energy).
 
 --erp: Equity Risk Premium for the Real-World transform (default: 0.055 i.e., 5.5%).
 

@@ -12,9 +12,10 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 class MarketExpectations:
-    def __init__(self, ticker: str, risk_free_rate: float = 0.04):
+    def __init__(self, ticker: str, risk_free_rate: float = 0.04, dividend_yield: float = 0.0):
         self.ticker = ticker.upper()
         self.r = risk_free_rate
+        self.q = dividend_yield
         self.stock = yf.Ticker(self.ticker)
         
         try:
@@ -35,21 +36,25 @@ class MarketExpectations:
         diffs = [abs((e - target_date).days) for e in edates]
         return self.expirations[int(np.argmin(diffs))]
 
-    def _black_scholes_call(self, S, K, T, r, sigma):
-        """Standard Black-Scholes Call Price calculation (Vectorized)."""
+    def _black_scholes_call(self, S, K, T, r, q, sigma):
+        """
+        Black-Scholes-Merton Call Price (Vectorized).
+        Adjusted for continuous dividend yield (q).
+        """
         # T is scalar here. If T is near zero, return intrinsic.
         if T < 1e-6:
              return np.maximum(S - K, 0)
 
-        # Note: sigma is an array. We assume caller ensures sigma > 0 to avoid div/0.
-        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        # d1 numerator includes (r - q)
+        d1 = (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
-        return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+        
+        # Call = S * e^(-qT) * N(d1) - K * e^(-rT) * N(d2)
+        return S * np.exp(-q * T) * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
 
     def _compute_risk_neutral_pdf(self, expiry: str, min_pct: float, max_pct: float) -> Optional[Dict]:
         """
         Derives PDF using Vol-Smoothing (Shimko-style).
-        Fits a quadratic to Implied Volatility rather than splining raw prices.
         """
         try:
             opts = self.stock.option_chain(expiry)
@@ -66,7 +71,7 @@ class MarketExpectations:
             (calls['strike'] > self.spot_price * min_pct) & 
             (calls['strike'] < self.spot_price * max_pct) &
             (calls['impliedVolatility'] > 0.01) &
-            (calls['impliedVolatility'] < 2.0) & # Filter IV > 200%
+            (calls['impliedVolatility'] < 2.0) &
             ((calls['volume'] > 0) | (calls['openInterest'] > 0))
         ].copy()
         
@@ -88,20 +93,20 @@ class MarketExpectations:
         
         # Predict Smooth IVs for the grid
         smooth_ivs = vol_curve(x_grid)
-        
-        # SAFETY: Clamp IV to positive values (polyfit can dip below 0)
         smooth_ivs = np.maximum(smooth_ivs, 0.01) 
         
-        # 4. Convert Smooth IV -> Smooth Call Prices -> PDF
-        smooth_calls = self._black_scholes_call(self.spot_price, x_grid, T, self.r, smooth_ivs)
+        # 4. Convert Smooth IV -> Smooth Call Prices (using q)
+        smooth_calls = self._black_scholes_call(self.spot_price, x_grid, T, self.r, self.q, smooth_ivs)
         
         # 5. Numerical Differentiation (Breeden-Litzenberger)
-        # PDF = e^(rT) * d^2C/dK^2
+        # PDF = e^(rT) * d^2C/dK^2 
+        # Note: Breeden-Litzenberger formula is invariant to q, 
+        # but the inputs (C) are now adjusted for it.
         dk = x_grid[1] - x_grid[0]
         second_deriv = np.gradient(np.gradient(smooth_calls, dk), dk)
         
         pdf_values = np.exp(self.r * T) * second_deriv
-        pdf_values = np.maximum(pdf_values, 0) # Floor noise at zero
+        pdf_values = np.maximum(pdf_values, 0) 
         
         integral = trapezoid(pdf_values, x_grid)
         if integral <= 0: return None
@@ -124,8 +129,13 @@ class MarketExpectations:
         pdf_q = data['pdf']
         T = data['T']
         
-        # Target Mean = Spot * e^( (r + ERP) * T )
-        target_mean = self.spot_price * np.exp((self.r + erp) * T)
+        # Target Mean Logic:
+        # CAPM gives Expected Total Return = r + ERP.
+        # Total Return = Price Appreciation + Dividend Yield.
+        # Price Appreciation = (r + ERP) - q.
+        # Target Price = Spot * e^( (r + ERP - q) * T )
+        
+        target_mean = self.spot_price * np.exp((self.r + erp - self.q) * T)
         
         def get_stats(gamma):
             # Power Utility Transform
@@ -259,6 +269,7 @@ def main():
     parser.add_argument("ticker", type=str)
     parser.add_argument("--months", type=float, default=12, help="Horizon (months)")
     parser.add_argument("--r", type=float, default=0.042, help="Risk-free rate")
+    parser.add_argument("--div", type=float, default=0.0, help="Dividend Yield (decimal, e.g. 0.03 for 3%)")
     parser.add_argument("--erp", type=float, default=0.055, help="Equity Risk Premium")
     parser.add_argument("--bounds", nargs=2, type=float, default=[0.5, 2.5], metavar=('MIN_X', 'MAX_X'),
                         help="Filter range as multiple of spot. Default: 0.5 2.5")
@@ -271,13 +282,13 @@ def main():
     args = parser.parse_args()
 
     try:
-        me = MarketExpectations(args.ticker, args.r)
+        me = MarketExpectations(args.ticker, args.r, args.div)
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
 
     print(f"\n--- Analysis for {args.ticker.upper()} ---")
-    print(f"Spot: ${me.spot_price:.2f} | Risk-Free: {args.r:.1%} | ERP: {args.erp:.1%}")
+    print(f"Spot: ${me.spot_price:.2f} | Risk-Free: {args.r:.1%} | ERP: {args.erp:.1%} | Div: {args.div:.1%}")
 
     min_p, max_p = args.bounds
 
